@@ -25,9 +25,11 @@ const SEC=["ESPAÑA","POLÍTICA","NOTICIAS"];
 const COL={"ESPAÑA":"#c8102e","POLÍTICA":"#1b4f9c","NOTICIAS":"#2e7d32"};
 const mkT=(c="")=>({id:Date.now()+Math.random(),type:"text",content:c});
 const mkTw=()=>({id:Date.now()+Math.random(),type:"tweet",handle:"",text:"",url:""});
+const mkIg=()=>({id:Date.now()+Math.random(),type:"insta",handle:"",text:"",url:"",data:null,rev:0,hasData:false});
+const llevaFoto=b=>b.type==="foto"||b.type==="insta";
 const mkL=(c="")=>({id:Date.now()+Math.random(),type:"ladillo",content:c});
 const mkF=()=>({id:Date.now()+Math.random(),type:"foto",data:null,pie:"",rev:0,hasData:false});
-const mkBloque=(tipo)=>tipo==="ladillo"?mkL():tipo==="tweet"?mkTw():tipo==="foto"?mkF():mkT();
+const mkBloque=(tipo)=>tipo==="ladillo"?mkL():tipo==="tweet"?mkTw():tipo==="insta"?mkIg():tipo==="foto"?mkF():mkT();
 const nuevaPieza=(id,tipo)=>({
   id,
   tipo:tipo==="opinion"?"opinion":"noticia",
@@ -107,7 +109,7 @@ function makeApi(base){
 
 /* La foto viaja por separado, así el guardado del texto sigue siendo ligero */
 function limpiaBloques(bs){
-  return(bs||[]).map(b=>b.type==="foto"
+  return(bs||[]).map(b=>llevaFoto(b)
     ?{...b,data:null,hasData:!!(b.hasData||b.data),rev:b.rev||0}
     :b);
 }
@@ -297,6 +299,8 @@ function BloqueTexto({block,onChange,onPartir,sinFoto}){
               style={{height:30,padding:"0 10px",border:"1.5px solid #111",background:"#f3f3f3",color:"#111",cursor:"pointer",fontSize:11,fontWeight:700,borderRadius:4}}>▌ Ladillo aquí</button>
             <button type="button" title="Pon el cursor donde quieras y pulsa aquí" onMouseDown={e=>{e.preventDefault();partir("tweet");}}
               style={{height:30,padding:"0 10px",border:"1.5px solid #1da1f2",background:"#e8f4fd",color:"#1077b5",cursor:"pointer",fontSize:11,fontWeight:700,borderRadius:4}}>🐦 Tuit aquí</button>
+            <button type="button" title="Pon el cursor donde quieras y pulsa aquí" onMouseDown={e=>{e.preventDefault();partir("insta");}}
+              style={{height:30,padding:"0 10px",border:"1.5px solid #c13584",background:"#fdeef6",color:"#a0226c",cursor:"pointer",fontSize:11,fontWeight:700,borderRadius:4}}>📸 Instagram aquí</button>
             {!sinFoto&&<button type="button" title="Pon el cursor donde quieras y pulsa aquí" onMouseDown={e=>{e.preventDefault();partir("foto");}}
               style={{height:30,padding:"0 10px",border:"1.5px solid #2e7d32",background:"#e8f5e9",color:"#2e7d32",cursor:"pointer",fontSize:11,fontWeight:700,borderRadius:4}}>📷 Foto aquí</button>}
           </div>
@@ -420,6 +424,71 @@ function TarjetaTuit({tweet}){
   );
 }
 
+/* ── BLOQUE DE INSTAGRAM (editor y lectura) ───────── */
+function IconoInsta({size}){
+  return(
+    <div style={{width:size,height:size,borderRadius:size*0.3,background:"linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+      <svg width={Math.round(size*0.62)} height={Math.round(size*0.62)} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="white" stroke="none"/></svg>
+    </div>
+  );
+}
+function BloqueInsta({block,onChange}){
+  const fileRef=useRef();
+  const[cargando,setCargando]=useState(false);
+  const subir=async e=>{
+    const f=e.target.files[0];
+    e.target.value="";
+    if(!f)return;
+    setCargando(true);
+    try{
+      const small=await encogerFoto(f,900,0.6);
+      onChange({...block,data:small});
+    }catch(err){
+      window.alert("No se ha podido usar esa foto: "+err.message);
+    }finally{setCargando(false);}
+  };
+  return(
+    <div style={{background:"#fdeef6",border:"2px solid #c13584",borderRadius:10,padding:14}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+        <IconoInsta size={28}/>
+        <span style={{fontWeight:800,fontSize:12,color:"#a0226c",letterSpacing:1}}>PUBLICACIÓN DE INSTAGRAM</span>
+      </div>
+      <input value={block.handle} onChange={e=>onChange({...block,handle:e.target.value})} placeholder="@usuario" style={{...iSt,marginBottom:8,fontSize:13}}/>
+      <div style={{display:"flex",gap:12,alignItems:"flex-start",marginBottom:10}}>
+        <button onClick={()=>fileRef.current.click()} disabled={cargando} style={{...bSec,opacity:cargando?0.5:1}}>
+          📷 {cargando?"Preparando...":(block.data?"Cambiar foto":"Subir la foto del post")}
+        </button>
+        <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={subir}/>
+        {block.data&&<button onClick={()=>onChange({...block,data:null})} style={{...bSec,color:"#c8102e"}}>Quitar</button>}
+        {block.data&&<img src={block.data} alt="" style={{width:95,height:95,objectFit:"cover",borderRadius:6,border:"2px solid #fff"}}/>}
+      </div>
+      <textarea value={block.text} onChange={e=>onChange({...block,text:e.target.value})} placeholder="Texto de la publicación" rows={3} style={{...iSt,resize:"vertical",marginBottom:8,fontSize:13}}/>
+      <input value={block.url} onChange={e=>onChange({...block,url:e.target.value})} placeholder="URL de la publicación (opcional)" style={{...iSt,marginBottom:0,fontSize:13}}/>
+    </div>
+  );
+}
+function TarjetaInsta({post}){
+  return(
+    <div style={{border:"1.5px solid #dbdbdb",borderRadius:10,margin:"18px 0",background:"#fff",maxWidth:470,overflow:"hidden"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px"}}>
+        <IconoInsta size={32}/>
+        <div>
+          <div style={{fontWeight:700,fontSize:14}}>{post.handle||"@usuario"}</div>
+          <div style={{fontSize:12,color:"#8e8e8e"}}>en Instagram</div>
+        </div>
+      </div>
+      {post.data
+        ?<img src={post.data} alt="" style={{width:"100%",aspectRatio:"1/1",objectFit:"cover",display:"block"}}/>
+        :<div style={{background:"#fafafa",height:200,display:"flex",alignItems:"center",justifyContent:"center",borderTop:"1px solid #efefef",borderBottom:"1px solid #efefef"}}><span style={{color:"#bbb",fontSize:13}}>📷 {post.hasData?"Cargando la foto del compañero...":"Foto sin subir"}</span></div>}
+      <div style={{padding:"10px 14px 12px"}}>
+        <div style={{fontSize:20,letterSpacing:6,marginBottom:6}}>♡ 💬 ➤</div>
+        <p style={{margin:0,fontSize:14,lineHeight:1.5,color:"#262626"}}><b>{(post.handle||"@usuario").replace(/^@/,"")}</b> {post.text}</p>
+        {post.url&&<a href={post.url} target="_blank" rel="noreferrer" style={{fontSize:12,color:"#c13584",display:"block",marginTop:8}}>Ver publicación en Instagram ↗</a>}
+      </div>
+    </div>
+  );
+}
+
 /* ── EDITOR DE BLOQUES ────────────────────────────── */
 function EditorBloques({blocks,onChange,sinFoto}){
   const mv=(i,d)=>{const b=[...blocks];const j=i+d;if(j<0||j>=b.length)return;[b[i],b[j]]=[b[j],b[i]];onChange(b);};
@@ -438,6 +507,7 @@ function EditorBloques({blocks,onChange,sinFoto}){
           <button onClick={()=>onChange([mkT()])} style={{...addBtn,background:"#f0f0f0",color:"#333",borderColor:"#ccc"}}>+ Añadir párrafo</button>
           <button onClick={()=>onChange([mkL()])} style={{...addBtn,background:"#f3f3f3",color:"#111",borderColor:"#111"}}>▌ Añadir ladillo</button>
           <button onClick={()=>onChange([mkTw()])} style={{...addBtn,background:"#e8f4fd",color:"#1da1f2",borderColor:"#1da1f2"}}>🐦 Añadir tuit</button>
+          <button onClick={()=>onChange([mkIg()])} style={{...addBtn,background:"#fdeef6",color:"#c13584",borderColor:"#c13584"}}>📸 Añadir Instagram</button>
         </div>
       )}
       {blocks.map((bl,i)=>(
@@ -452,6 +522,7 @@ function EditorBloques({blocks,onChange,sinFoto}){
               {bl.type==="text"&&<BloqueTexto block={bl} onChange={v=>up(i,{...bl,content:v})} onPartir={(a,d,t)=>partir(i,a,d,t)} sinFoto={sinFoto}/>}
               {bl.type==="ladillo"&&<BloqueLadillo block={bl} onChange={v=>up(i,v)}/>}
               {bl.type==="tweet"&&<BloqueTuit block={bl} onChange={v=>up(i,v)}/>}
+              {bl.type==="insta"&&<BloqueInsta block={bl} onChange={v=>up(i,v)}/>}
               {bl.type==="foto"&&<BloqueFoto block={bl} onChange={v=>up(i,v)}/>}
             </div>
           </div>
@@ -549,7 +620,7 @@ function EditorNoticia({article,onGuardar,onCancelar}){
           </div>
           <div style={{height:6}}/>
           <div style={{background:"#f8f8f8",border:"2px solid #e8e8e8",borderRadius:8,padding:14,marginBottom:16}}>
-            <p style={{fontSize:12,color:"#888",margin:"0 0 12px"}}>Escribe de corrido y luego pon el cursor donde quieras el ladillo o el tuit, pulsa el botón de la barra y el párrafo se parte solo · ▲▼ para reordenar · ✕ para eliminar</p>
+            <p style={{fontSize:12,color:"#888",margin:"0 0 12px"}}>Escribe de corrido y luego pon el cursor donde quieras el ladillo, el tuit o el Instagram, pulsa el botón de la barra y el párrafo se parte solo · ▲▼ para reordenar · ✕ para eliminar</p>
             <EditorBloques blocks={form.blocks} onChange={b=>setForm(f=>({...f,blocks:b}))} sinFoto={form.tipo==="opinion"}/>
           </div>
           {!llega&&(
@@ -601,6 +672,7 @@ function LectorNoticia({article,onVolver,onEditar}){
             {b.type==="text"&&<div style={{fontSize:17,lineHeight:1.8,color:"#222",fontFamily:"Georgia,serif",marginBottom:16}} dangerouslySetInnerHTML={{__html:(b.content||"").replace(/\n/g,"<br/>")}}/>}
             {b.type==="ladillo"&&<TarjetaLadillo block={b} color={color}/>}
             {b.type==="tweet"&&<TarjetaTuit tweet={b}/>}
+            {b.type==="insta"&&<TarjetaInsta post={b}/>}
             {b.type==="foto"&&<TarjetaFoto block={b}/>}
           </div>
         ))}
@@ -715,7 +787,7 @@ function App(){
         }
       }
       for(const b of a.blocks||[]){
-        if(b.type!=="foto"||!b.hasData||!b.rev)continue;
+        if(!llevaFoto(b)||!b.hasData||!b.rev)continue;
         const ck=fotosRef.current["b"+b.id];
         if(ck&&ck.rev===b.rev)continue;
         try{
@@ -750,7 +822,7 @@ function App(){
               const propia=(cache&&cache.rev===a.imageRev)?cache.data:imgMap[a.id];
               const previos=blqMap[a.id]||{};
               const bloques=(a.blocks||[]).map(b=>{
-                if(b.type!=="foto")return b;
+                if(!llevaFoto(b))return b;
                 const ck=fotosRef.current["b"+b.id];
                 const dato=(ck&&ck.rev===b.rev)?ck.data:previos[b.id];
                 return{...b,data:b.hasData?(dato||null):null};
@@ -814,7 +886,7 @@ function App(){
     const antBloques=Object.fromEntries(((anterior&&anterior.blocks)||[]).map(b=>[b.id,b.data]));
     const bloques=[];
     for(const b of updated.blocks||[]){
-      if(b.type!=="foto"){bloques.push(b);continue;}
+      if(!llevaFoto(b)){bloques.push(b);continue;}
       if(b.data!==antBloques[b.id]){
         const rev=b.data?Date.now()+Math.round(Math.random()*999):0;
         if(b.data){
@@ -882,6 +954,7 @@ function App(){
       if(b.type==="foto")return b.data
         ? `<figure class="fotoCuerpo"><img src="${b.data}" alt="${esc(b.pie||"")}"/>${b.pie?`<figcaption>${esc(b.pie)}</figcaption>`:""}</figure>`
         : "";
+      if(b.type==="insta")return `<div class="insta"><div class="insta-cab"><span class="insta-ico"></span><b>${esc(b.handle||"@usuario")}</b></div>${b.data?`<img src="${b.data}" alt=""/>`:""}<p><b>${esc((b.handle||"@usuario").replace(/^@/,""))}</b> ${esc(b.text||"")}</p>${b.url?`<a class="enlace-insta" href="${esc(b.url)}" target="_blank" rel="noreferrer">Ver publicación en Instagram</a>`:""}</div>`;
       return `<div class="tuit"><div class="tuit-user">${esc(b.handle||"@usuario")}</div><p>${esc(b.text||"")}</p>${b.url?`<a class="enlace" href="${esc(b.url)}" target="_blank" rel="noreferrer">Ver tuit original</a>`:""}</div>`;
     };
     const fecha=new Date().toLocaleDateString("es-ES",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
@@ -978,6 +1051,12 @@ img.retratoMini{width:78px;height:78px;border-radius:50%;object-fit:cover;margin
 .tuit{border:1.5px solid #e1e8ed;border-radius:12px;padding:12px 14px;margin:18px 0;max-width:520px}
 .tuit-user{font-weight:700;font-size:14px;margin-bottom:6px}
 .tuit p{font-size:15px;line-height:1.5}
+.insta{border:1.5px solid #dbdbdb;border-radius:10px;margin:18px 0;max-width:470px;overflow:hidden;background:#fff}
+.insta-cab{display:flex;align-items:center;gap:10px;padding:10px 14px;font-size:14px}
+.insta-ico{width:28px;height:28px;border-radius:9px;background:linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888);display:inline-block}
+.insta img{width:100%;aspect-ratio:1/1;object-fit:cover;display:block}
+.insta p{font-size:14px;line-height:1.5;padding:10px 14px 4px;color:#262626}
+.enlace-insta{display:inline-block;margin:0 14px 12px;font-size:12px;color:#c13584}
 .enlace{display:inline-block;margin-top:8px;font-size:12px;color:#1da1f2}
 .borrador{background:#ffc107;color:#000;font-size:10px;font-weight:700;padding:2px 6px;margin-left:8px}
 .volver{display:inline-block;margin-top:14px;font-size:12px;color:#c8102e}
@@ -1106,7 +1185,7 @@ ${piezas}
         )}
         <div style={{background:"#e8f4fd",border:"1px solid #90caf9",borderRadius:8,padding:"12px 18px",fontSize:13,color:"#0d47a1"}}>
           <strong>🔀 PORTADA:</strong> Pasa el ratón por encima de una pieza y usa ▲▼ para moverla, ★ PORTADA para ponerla de grande y 🗑 para eliminarla. Arriba tienes ➕ Noticia y ➕ Opinión para añadir las que quieras.<br/>
-          <strong>🔄 SINCRONIZACIÓN:</strong> Los textos, los tuits y las fotos se guardan solos y los compañeros los ven en unos segundos. Al terminar la clase, pulsa «Descargar periódico» y «Descargar copia».
+          <strong>🔄 SINCRONIZACIÓN:</strong> Los textos, los tuits, los Instagram y las fotos se guardan solos y los compañeros los ven en unos segundos. Al terminar la clase, pulsa «Descargar periódico» y «Descargar copia».
         </div>
       </main>
 
