@@ -610,7 +610,7 @@ function LectorNoticia({article,onVolver,onEditar}){
 }
 
 /* ── TARJETA DE PORTADA ───────────────────────────── */
-function TarjetaPortada({article,index,onClick,onEditar,photoRight,onPrincipal,onMover,onBorrar,esPrimera,esUltima}){
+function TarjetaPortada({article,index,onClick,onEditar,photoRight,mediana,onPrincipal,onMover,onBorrar,esPrimera,esUltima}){
   const color=COL[article.section]||"#c8102e";
   const isMain=index===0;
   const esOpinion=article.tipo==="opinion";
@@ -639,6 +639,16 @@ function TarjetaPortada({article,index,onClick,onEditar,photoRight,onPrincipal,o
             <h2 style={{fontSize:"clamp(22px,3.5vw,36px)",fontWeight:900,lineHeight:1.1,color:"#111",margin:"0 0 8px",fontFamily:"Georgia,serif"}}>{article.title}</h2>
             <p style={{fontSize:15,color:"#444",lineHeight:1.5,margin:"0 0 8px",fontFamily:"Georgia,serif"}}>{article.subtitle}</p>
             <div style={{fontSize:12,color:"#888",fontWeight:700}}>{article.author}{!article.published&&<span style={{marginLeft:10,background:"#ffc107",color:"#000",padding:"2px 7px",fontSize:10,fontWeight:700}}>BORRADOR</span>}</div>
+          </div>
+        </div>
+      ):mediana?(
+        <div style={{display:"flex",minHeight:140}}>
+          {img&&<img src={img} alt="" style={{width:220,minHeight:140,objectFit:"cover",flexShrink:0,objectPosition:article.imagePosition||"center"}}/>}
+          <div style={{padding:"12px 16px",flex:1}}>
+            <div style={{display:"inline-block",color,fontWeight:900,fontSize:10,letterSpacing:1.5,marginBottom:5,fontFamily:"sans-serif"}}>{article.section}</div>
+            <h3 style={{fontSize:20,fontWeight:900,lineHeight:1.2,color:"#111",margin:"0 0 6px",fontFamily:"Georgia,serif"}}>{article.title}</h3>
+            <p style={{fontSize:13,color:"#555",margin:0,lineHeight:1.4,fontFamily:"Georgia,serif"}}>{article.subtitle}</p>
+            {!article.published&&<span style={{marginTop:6,display:"inline-block",background:"#ffc107",color:"#000",padding:"1px 6px",fontSize:9,fontWeight:700}}>BORRADOR</span>}
           </div>
         </div>
       ):(
@@ -1072,10 +1082,19 @@ ${piezas}
               <TarjetaPortada article={articles[0]} index={0} onClick={()=>setLeyendo(articles[0].id)} onEditar={()=>setEditando(articles[0])}
                 onMover={d=>moverArticulo(articles[0].id,d)} onBorrar={articles.length>1?()=>borrarPieza(articles[0].id):null}
                 esPrimera={true} esUltima={articles.length<2}/>
+              {/* A partir de la quinta pieza van debajo de la grande, aunque en el orden del periódico siguen detrás de la columna */}
+              {articles.slice(4).map((art,i)=>(
+                <div key={art.id} style={{borderTop:"1px solid #e0e0e0"}}>
+                  <TarjetaPortada article={art} index={i+4} mediana={true} onClick={()=>setLeyendo(art.id)} onEditar={()=>setEditando(art)}
+                    onMover={d=>moverArticulo(art.id,d)} onPrincipal={()=>hacerPrincipal(art.id)}
+                    onBorrar={()=>borrarPieza(art.id)}
+                    esPrimera={false} esUltima={i===articles.length-5}/>
+                </div>
+              ))}
             </div>
             <div>
-              {articles.slice(1).map((art,i)=>(
-                <div key={art.id} style={{borderBottom:i<articles.length-2?"1px solid #e0e0e0":"none"}}>
+              {articles.slice(1,4).map((art,i)=>(
+                <div key={art.id} style={{borderBottom:i<Math.min(articles.length,4)-2?"1px solid #e0e0e0":"none"}}>
                   <TarjetaPortada article={art} index={i+1} photoRight={i===0||i===2} onClick={()=>setLeyendo(art.id)} onEditar={()=>setEditando(art)}
                     onMover={d=>moverArticulo(art.id,d)} onPrincipal={()=>hacerPrincipal(art.id)}
                     onBorrar={()=>borrarPieza(art.id)}
