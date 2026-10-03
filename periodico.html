@@ -4,12 +4,13 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Ahora – Periódico Digital</title>
-<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.24.7/babel.min.js"></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:sans-serif;background:#f5f5f5}
+  body{font-family:sans-serif;background:#f5f5f5;-webkit-text-size-adjust:100%}
+  @media (pointer:coarse){input,textarea,select{font-size:16px!important}}
   input,textarea,select{font-family:inherit}
   [contenteditable]:focus{outline:2px solid #c8102e;outline-offset:2px;border-radius:2px}
   ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:#ccc;border-radius:3px}
@@ -54,6 +55,7 @@ const DEF=()=>[
 // La IP del servidor se detecta automáticamente desde la URL
 
 function getServerBase(){
+  if(window.__BASE__)return window.__BASE__;
   const loc=window.location;
   // Funciona tanto en http (local) como en https (Render)
   if(loc.protocol==="https:"){
@@ -73,8 +75,41 @@ function fetchConTimeout(url,opts,ms=8000){
   });
 }
 
+/* Cada pestaña tiene su propia sesión para saber quién está escribiendo cada noticia */
+const SESION=window.__SESION__||(Math.random().toString(36).slice(2)+Date.now().toString(36));
+const MSG_OCUPADA="Un compañero está escribiendo esta noticia ahora mismo. Elige otra o espera a que la guarde o la cierre.";
+const MSG_PERDIDA="Se ha cortado tu conexión y otra persona ha abierto esta noticia. Copia tu texto antes de cerrar para no perderlo.";
+const MSG_NO_GUARDA="No se ha guardado porque otra persona ha abierto esta noticia mientras estabas sin conexión. Copia tu texto antes de cerrar para no perderlo.";
+const MSG_SIN_RED="No se ha podido guardar porque se ha cortado la conexión. Tu texto sigue aquí, espera unos segundos y vuelve a pulsar Guardar.";
+
 function makeApi(base){
+  const g=grupo=>encodeURIComponent(grupo);
+  const post=async(ruta,datos)=>{
+    const r=await fetchConTimeout(`${base}/${ruta}`,{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(datos)
+    },15000);
+    if(!r.ok)throw new Error(`HTTP ${r.status}`);
+    return await r.json();
+  };
   return{
+    coger(grupo,id){return post("__bloqueo",{grupo:g(grupo),id,sesion:SESION,accion:"coger"});},
+    soltar(grupo,id){return post("__bloqueo",{grupo:g(grupo),id,sesion:SESION,accion:"soltar"});},
+    soltarYa(grupo,id){
+      const datos=JSON.stringify({grupo:g(grupo),id,sesion:SESION,accion:"soltar"});
+      try{
+        if(navigator.sendBeacon&&navigator.sendBeacon(`${base}/__bloqueo`,new Blob([datos],{type:"text/plain"})))return;
+      }catch{}
+      try{fetch(`${base}/__bloqueo`,{method:"POST",body:datos,keepalive:true});}catch{}
+    },
+    async bloqueos(grupo){
+      const r=await fetchConTimeout(`${base}/__bloqueos/${g(grupo)}`);
+      if(!r.ok)throw new Error(`HTTP ${r.status}`);
+      return (await r.json())||[];
+    },
+    guardarArticulo(grupo,articulo){return post("__articulo",{grupo:g(grupo),sesion:SESION,articulo});},
+    estructura(grupo,cambio){return post("__estructura",{grupo:g(grupo),sesion:SESION,...cambio});},
     async leer(grupo){
       const r=await fetchConTimeout(`${base}/${encodeURIComponent(grupo)}`);
       if(!r.ok)throw new Error(`HTTP ${r.status}`);
@@ -113,6 +148,7 @@ function limpiaBloques(bs){
     ?{...b,data:null,hasData:!!(b.hasData||b.data),rev:b.rev||0}
     :b);
 }
+const sinFotosArt=a=>sinFotos({articles:[a]}).articles[0];
 function sinFotos(data){
   return{
     ...data,
@@ -136,7 +172,7 @@ function encogerFoto(file,max=1000,calidad=0.62){
         c.getContext("2d").drawImage(img,0,0,w,h);
         try{res(c.toDataURL("image/jpeg",calidad));}catch(e){rej(e);}
       };
-      img.onerror=()=>rej(new Error("El archivo no es una imagen válida"));
+      img.onerror=()=>rej(new Error("no se puede abrir esa imagen. Si es una foto de iPhone en formato HEIC, ábrela en Safari o guárdala antes como JPG"));
       img.src=lector.result;
     };
     lector.onerror=()=>rej(new Error("No se pudo leer el archivo"));
@@ -182,7 +218,7 @@ function Entrada({onEntrar}){
       <div style={{background:"#fff",borderRadius:16,padding:"40px 36px",maxWidth:460,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.4)",textAlign:"center"}}>
         <div style={{fontSize:52,marginBottom:8}}>🗞️</div>
         <h1 style={{fontFamily:"Georgia,serif",fontSize:30,fontWeight:900,color:"#111",marginBottom:4}}>AHORA</h1>
-        <p style={{color:"#999",fontSize:12,letterSpacing:2,textTransform:"uppercase",marginBottom:28}}>Periódico Digital de Aula · v4</p>
+        <p style={{color:"#999",fontSize:12,letterSpacing:2,textTransform:"uppercase",marginBottom:28}}>Periódico Digital de Aula · v5</p>
 
         {!base&&(
           <div style={{background:"#fff3cd",border:"1.5px solid #ffc107",borderRadius:8,padding:"12px 14px",marginBottom:20,textAlign:"left"}}>
@@ -254,8 +290,27 @@ function BloqueTexto({block,onChange,onPartir,sinFoto}){
     onChange(html);
   };
 
+  /* El iPad pierde la selección al tocar un botón, por eso se guarda la última posición del cursor */
+  const ultimo=React.useRef(null);
+  React.useEffect(()=>{
+    const f=()=>{
+      const sel=window.getSelection();
+      if(sel&&sel.rangeCount>0&&ref.current&&ref.current.contains(sel.anchorNode))ultimo.current=sel.getRangeAt(0).cloneRange();
+    };
+    document.addEventListener("selectionchange",f);
+    return()=>document.removeEventListener("selectionchange",f);
+  },[]);
+  const recuperar=()=>{
+    const sel=window.getSelection();
+    if(ultimo.current&&ref.current&&ref.current.contains(ultimo.current.startContainer)
+       &&!(sel&&sel.rangeCount>0&&ref.current.contains(sel.anchorNode))){
+      sel.removeAllRanges();sel.addRange(ultimo.current);
+    }
+  };
+
   const fmt=(cmd)=>{
     ref.current.focus();
+    recuperar();
     document.execCommand(cmd,false,null);
     onChange(ref.current.innerHTML);
   };
@@ -263,6 +318,7 @@ function BloqueTexto({block,onChange,onPartir,sinFoto}){
   /* Parte el párrafo justo donde está el cursor y mete el bloque nuevo ahí */
   const partir=(tipo)=>{
     const el=ref.current;
+    recuperar();
     let antes=el.innerHTML,despues="";
     const sel=window.getSelection();
     if(sel&&sel.rangeCount>0&&el.contains(sel.anchorNode)){
@@ -279,21 +335,21 @@ function BloqueTexto({block,onChange,onPartir,sinFoto}){
   return(
     <div>
       <div style={{display:"flex",gap:5,marginBottom:5}}>
-        <button type="button" onMouseDown={e=>{e.preventDefault();fmt("bold");}}
+        <button type="button" onPointerDown={e=>{e.preventDefault();fmt("bold");}}
           style={{width:30,height:30,border:"1.5px solid #ddd",background:"#fff",cursor:"pointer",fontWeight:"bold",fontSize:13,borderRadius:4}}>N</button>
-        <button type="button" onMouseDown={e=>{e.preventDefault();fmt("italic");}}
+        <button type="button" onPointerDown={e=>{e.preventDefault();fmt("italic");}}
           style={{width:30,height:30,border:"1.5px solid #ddd",background:"#fff",cursor:"pointer",fontStyle:"italic",fontSize:13,borderRadius:4}}>K</button>
-        <button type="button" onMouseDown={e=>{e.preventDefault();fmt("underline");}}
+        <button type="button" onPointerDown={e=>{e.preventDefault();fmt("underline");}}
           style={{width:30,height:30,border:"1.5px solid #ddd",background:"#fff",cursor:"pointer",textDecoration:"underline",fontSize:13,borderRadius:4}}>S</button>
         {onPartir&&(
           <div style={{display:"flex",gap:5,marginLeft:"auto"}}>
-            <button type="button" title="Pon el cursor donde quieras y pulsa aquí" onMouseDown={e=>{e.preventDefault();partir("ladillo");}}
+            <button type="button" title="Pon el cursor donde quieras y pulsa aquí" onPointerDown={e=>{e.preventDefault();partir("ladillo");}}
               style={{height:30,padding:"0 10px",border:"1.5px solid #111",background:"#f3f3f3",color:"#111",cursor:"pointer",fontSize:11,fontWeight:700,borderRadius:4}}>▌ Ladillo aquí</button>
-            <button type="button" title="Pon el cursor donde quieras y pulsa aquí" onMouseDown={e=>{e.preventDefault();partir("tweet");}}
+            <button type="button" title="Pon el cursor donde quieras y pulsa aquí" onPointerDown={e=>{e.preventDefault();partir("tweet");}}
               style={{height:30,padding:"0 10px",border:"1.5px solid #1da1f2",background:"#e8f4fd",color:"#1077b5",cursor:"pointer",fontSize:11,fontWeight:700,borderRadius:4}}>🐦 Tuit aquí</button>
-            <button type="button" title="Pon el cursor donde quieras y pulsa aquí" onMouseDown={e=>{e.preventDefault();partir("insta");}}
+            <button type="button" title="Pon el cursor donde quieras y pulsa aquí" onPointerDown={e=>{e.preventDefault();partir("insta");}}
               style={{height:30,padding:"0 10px",border:"1.5px solid #c13584",background:"#fdeef6",color:"#a0226c",cursor:"pointer",fontSize:11,fontWeight:700,borderRadius:4}}>📸 Instagram aquí</button>
-            {!sinFoto&&<button type="button" title="Pon el cursor donde quieras y pulsa aquí" onMouseDown={e=>{e.preventDefault();partir("foto");}}
+            {!sinFoto&&<button type="button" title="Pon el cursor donde quieras y pulsa aquí" onPointerDown={e=>{e.preventDefault();partir("foto");}}
               style={{height:30,padding:"0 10px",border:"1.5px solid #2e7d32",background:"#e8f5e9",color:"#2e7d32",cursor:"pointer",fontSize:11,fontWeight:700,borderRadius:4}}>📷 Foto aquí</button>}
           </div>
         )}
@@ -303,7 +359,7 @@ function BloqueTexto({block,onChange,onPartir,sinFoto}){
         contentEditable
         suppressContentEditableWarning
         onInput={onInput}
-        style={{minHeight:120,padding:"10px 12px",border:"2px solid #e0e0e0",borderRadius:6,outline:"none",lineHeight:1.7,fontSize:15,fontFamily:"Georgia,serif",background:"#fafafa"}}
+        style={{minHeight:120,padding:"10px 12px",border:"2px solid #e0e0e0",borderRadius:6,outline:"none",lineHeight:1.7,fontSize:16,fontFamily:"Georgia,serif",background:"#fafafa"}}
       />
     </div>
   );
@@ -547,7 +603,7 @@ function EditorNoticia({article,onGuardar,onCancelar}){
   const palabras=contarPalabras(form.blocks);
   const llega=palabras>=MINIMO;
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",zIndex:1000,overflowY:"auto",padding:"20px 0"}}>
+    <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.65)",zIndex:1000,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"20px 0"}}>
       <div style={{maxWidth:760,margin:"0 auto",background:"#fff",borderRadius:12,overflow:"hidden",boxShadow:"0 20px 60px rgba(0,0,0,0.4)"}}>
         <div style={{background:"#c8102e",padding:"16px 24px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <span style={{color:"#fff",fontWeight:800,fontSize:16}}>✏️ EDITOR DE NOTICIA #{article.id}</span>
@@ -595,7 +651,7 @@ function EditorNoticia({article,onGuardar,onCancelar}){
                     setForm(f=>({...f,imagePosition:`${x}% ${y}%`}));
                   }}>
                   <img src={form.image} alt="preview" style={{width:"100%",height:"100%",objectFit:"cover",objectPosition:form.imagePosition||"center",pointerEvents:"none"}}/>
-                  <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none"}}>
+                  <div style={{position:"absolute",top:0,left:0,right:0,bottom:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none"}}>
                     <span style={{background:"rgba(0,0,0,0.5)",color:"#fff",fontSize:11,padding:"3px 8px",borderRadius:4}}>👆 Haz clic donde quieres centrar la foto</span>
                   </div>
                 </div>
@@ -674,7 +730,8 @@ function LectorNoticia({article,onVolver,onEditar}){
 }
 
 /* ── TARJETA DE PORTADA ───────────────────────────── */
-function TarjetaPortada({article,index,onClick,onEditar,photoRight,mediana,onPrincipal,onMover,onBorrar,esPrimera,esUltima}){
+const TACTIL=!!(window.matchMedia&&window.matchMedia("(hover: none)").matches);
+function TarjetaPortada({article,index,onClick,onEditar,photoRight,mediana,onPrincipal,onMover,onBorrar,esPrimera,esUltima,ocupada}){
   const color=COL[article.section]||"#c8102e";
   const isMain=index===0;
   const esOpinion=article.tipo==="opinion";
@@ -726,15 +783,16 @@ function TarjetaPortada({article,index,onClick,onEditar,photoRight,mediana,onPri
           </div>
         </div>
       )}
-      {hover&&(
-        <div style={{position:"absolute",top:8,right:8,display:"flex",gap:4}}>
+      {ocupada&&<div style={{position:"absolute",top:8,left:8,zIndex:2,background:"#1b2a4a",color:"#fff",fontSize:10,fontWeight:800,padding:"3px 8px",borderRadius:4,fontFamily:"sans-serif"}}>✍️ La está escribiendo un compañero</div>}
+      {(hover||TACTIL)&&(
+        <div style={{position:"absolute",top:8,right:8,display:"flex",gap:4,flexWrap:"wrap",justifyContent:"flex-end"}}>
           {onMover&&<button title="Subir esta noticia" disabled={esPrimera} onClick={e=>{e.stopPropagation();onMover(-1);}}
             style={{...portadaBtn,opacity:esPrimera?0.35:1}}>▲</button>}
           {onMover&&<button title="Bajar esta noticia" disabled={esUltima} onClick={e=>{e.stopPropagation();onMover(1);}}
             style={{...portadaBtn,opacity:esUltima?0.35:1}}>▼</button>}
           {onPrincipal&&!isMain&&<button title="Poner esta noticia como la grande" onClick={e=>{e.stopPropagation();onPrincipal();}}
             style={portadaBtn}>★ PORTADA</button>}
-          <button onClick={e=>{e.stopPropagation();onEditar();}} style={portadaBtn}>✏️ EDITAR</button>
+          <button onClick={e=>{e.stopPropagation();onEditar();}} style={{...portadaBtn,opacity:ocupada?0.45:1}}>✏️ EDITAR</button>
           {onBorrar&&<button title="Eliminar esta pieza" onClick={e=>{e.stopPropagation();onBorrar();}}
             style={{...portadaBtn,background:"rgba(200,16,46,0.9)"}}>🗑</button>}
         </div>
@@ -759,6 +817,8 @@ function App(){
   const stRef    = useRef({});
   const importRef= useRef(null);
   const fotosRef = useRef({});
+  const abriendoRef = useRef(false);
+  const[ocupadas,setOcupadas]=useState(new Set());
 
   useEffect(()=>{stRef.current={articles,paperName};},[articles,paperName]);
   useEffect(()=>()=>{if(pollRef.current)clearInterval(pollRef.current);},[]);
@@ -798,6 +858,10 @@ function App(){
   const startPoll=useCallback((api,grp)=>{
     if(pollRef.current)clearInterval(pollRef.current);
     pollRef.current=setInterval(async()=>{
+      try{
+        const bl=await apiRef.current.bloqueos(grupoRef.current);
+        setOcupadas(new Set(bl.filter(x=>x.sesion!==SESION).map(x=>String(x.id))));
+      }catch{}
       try{
         const r=await apiRef.current.leer(grupoRef.current);
         if(!r||!r.articles)return;
@@ -843,6 +907,82 @@ function App(){
       try{await api.guardar(grp,{articles:def,paperName:"AHORA"});}catch{}
     }
     startPoll(api,grp);
+  };
+
+  /* Junta una noticia del servidor con las fotos que ya tiene este ordenador */
+  const conFotos=(a,local)=>{
+    const cache=fotosRef.current[a.id];
+    const image=a.hasImage?((cache&&cache.rev===a.imageRev)?cache.data:(local?local.image:null)):(a.image||null);
+    const prev=Object.fromEntries(((local&&local.blocks)||[]).map(b=>[b.id,b.data]));
+    const blocks=(a.blocks||[]).map(b=>{
+      if(!llevaFoto(b))return b;
+      const ck=fotosRef.current["b"+b.id];
+      const dato=(ck&&ck.rev===b.rev)?ck.data:prev[b.id];
+      return{...b,data:b.hasData?(dato||null):(b.data||null)};
+    });
+    return{...a,image,blocks};
+  };
+
+  /* Solo una persona puede tener abierta cada noticia */
+  const abrirEditor=async(art)=>{
+    if(!art||abriendoRef.current)return false;
+    abriendoRef.current=true;
+    try{
+      const r=await apiRef.current.coger(grupoRef.current,art.id);
+      if(!r.ok){
+        setOcupadas(s=>new Set([...s,String(art.id)]));
+        window.alert(MSG_OCUPADA);
+        return false;
+      }
+      const local=(stRef.current.articles||[]).find(x=>x.id===art.id)||art;
+      setEditando(r.articulo?conFotos(r.articulo,local):local);
+      return true;
+    }catch(e){
+      window.alert("No hay conexión con el periódico. Espera unos segundos y vuelve a intentarlo.");
+      return false;
+    }finally{abriendoRef.current=false;}
+  };
+  const cerrarEditor=()=>{
+    const e=editando;
+    setEditando(null);
+    if(e)apiRef.current.soltar(grupoRef.current,e.id).catch(()=>{});
+  };
+  /* Mientras el editor está abierto, avisa al servidor de que la noticia sigue ocupada */
+  const idEditando=editando?editando.id:null;
+  useEffect(()=>{
+    if(idEditando===null)return;
+    let avisado=false;
+    const t=setInterval(async()=>{
+      try{
+        const r=await apiRef.current.coger(grupoRef.current,idEditando);
+        if(!r.ok&&!avisado){avisado=true;window.alert(MSG_PERDIDA);}
+      }catch{}
+    },12000);
+    const salir=()=>apiRef.current&&apiRef.current.soltarYa(grupoRef.current,idEditando);
+    window.addEventListener("pagehide",salir);
+    return()=>{clearInterval(t);window.removeEventListener("pagehide",salir);};
+  },[idEditando]);
+
+  /* Orden, piezas nuevas, borrados y nombre: el servidor junta los cambios de todos */
+  const estructura=async(cambio,provisional)=>{
+    if(provisional){stRef.current={...stRef.current,articles:provisional};setArticles(provisional);}
+    setSyncStatus("saving");
+    try{
+      const r=await apiRef.current.estructura(grupoRef.current,cambio);
+      if(!r.ok){
+        setSyncStatus("ok");
+        if(r.motivo==="ocupada")window.alert("No se puede eliminar porque un compañero la está escribiendo ahora mismo.");
+        return false;
+      }
+      const doc=r.doc||{};
+      const prev=stRef.current.articles||[];
+      const lista=(doc.articles||[]).map(a=>conFotos(a,prev.find(x=>x.id===a.id)));
+      const pn=doc.paperName||stRef.current.paperName;
+      stRef.current={articles:lista,paperName:pn};
+      setArticles(lista);setPaperName(pn);
+      setSyncStatus("ok");setLastSaved(new Date());
+      return true;
+    }catch(e){setSyncStatus("error");return false;}
   };
 
   const push=async(arts,pn)=>{
@@ -893,21 +1033,24 @@ function App(){
       }
     }
     art={...art,blocks:bloques};
-    const updatedFinal=art;
-    const next=articles.map(x=>x.id===updatedFinal.id?updatedFinal:x);
-    // Actualizar stRef ANTES de setArticles para evitar race condition con el poll
+    setSyncStatus("saving");
+    try{
+      const r=await apiRef.current.guardarArticulo(grupoRef.current,sinFotosArt(art));
+      if(!r.ok){setSyncStatus("error");window.alert(MSG_NO_GUARDA);return;}
+    }catch(e){
+      setSyncStatus("error");window.alert(MSG_SIN_RED);return;
+    }
+    const next=(stRef.current.articles||[]).map(x=>x.id===art.id?art:x);
+    if(!next.some(x=>x.id===art.id))next.push(art);
     stRef.current={...stRef.current,articles:next};
     setArticles(next);
+    setSyncStatus("ok");setLastSaved(new Date());
     setEditando(null);
-    await push(next,paperName);
+    apiRef.current.soltar(grupoRef.current,art.id).catch(()=>{});
   };
 
   /* Cambia el orden de las noticias en la portada */
-  const reordenar=async(lista)=>{
-    stRef.current={...stRef.current,articles:lista};
-    setArticles(lista);
-    await push(lista,paperName);
-  };
+  const reordenar=(lista)=>estructura({orden:lista.map(a=>a.id)},lista);
   const moverArticulo=(id,dir)=>{
     const i=articles.findIndex(a=>a.id===id);
     const j=i+dir;
@@ -919,12 +1062,14 @@ function App(){
   const anadirPieza=(tipo)=>{
     const ids=articles.map(a=>Number(a.id)||0);
     const id=(ids.length?Math.max(...ids):0)+1;
-    reordenar([...articles,nuevaPieza(id,tipo)]);
+    const nueva=nuevaPieza(id,tipo);
+    estructura({orden:[...articles.map(a=>a.id),id],nuevas:[sinFotosArt(nueva)]},[...articles,nueva]);
   };
   const borrarPieza=(id)=>{
     const a=articles.find(x=>x.id===id);
+    if(ocupadas.has(String(id))){window.alert("No se puede eliminar porque un compañero la está escribiendo ahora mismo.");return;}
     if(!window.confirm("Vas a eliminar «"+((a&&a.title)||"esta pieza")+"» para todo el grupo. ¿Sigues?"))return;
-    reordenar(articles.filter(x=>x.id!==id));
+    estructura({orden:articles.filter(x=>x.id!==id).map(x=>x.id),borrar:[id]});
   };
   const hacerPrincipal=(id)=>{
     const i=articles.findIndex(a=>a.id===id);
@@ -1061,23 +1206,13 @@ ${sumario}
 ${piezas}
 </div></body></html>`;
 
-    const url=URL.createObjectURL(new Blob([doc],{type:"text/html"}));
-    const a=document.createElement("a");
-    a.href=url;
-    a.download=`${grupoRef.current}-${new Date().toISOString().slice(0,10)}.html`;
-    a.click();
-    URL.revokeObjectURL(url);
+    bajarArchivo(doc,`${grupoRef.current}-${new Date().toISOString().slice(0,10)}.html`);
   };
 
   /* ── COPIA DE SEGURIDAD (.json) ─────────────────── */
   const descargarCopia=()=>{
     const data=JSON.stringify({grupo:grupoRef.current,paperName,articles},null,2);
-    const url=URL.createObjectURL(new Blob([data],{type:"application/json"}));
-    const a=document.createElement("a");
-    a.href=url;
-    a.download=`copia-${grupoRef.current}-${new Date().toISOString().slice(0,10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    bajarArchivo(data,`copia-${grupoRef.current}-${new Date().toISOString().slice(0,10)}.json`);
   };
 
   const cargarCopia=(e)=>{
@@ -1106,7 +1241,7 @@ ${piezas}
 
   if(leyendo!==null){
     const art=articles.find(a=>a.id===leyendo);
-    return <LectorNoticia article={art} onVolver={()=>setLeyendo(null)} onEditar={()=>{setEditando(art);setLeyendo(null);}}/>;
+    return <LectorNoticia article={art} onVolver={()=>setLeyendo(null)} onEditar={async()=>{if(await abrirEditor(art))setLeyendo(null);}}/>;
   }
 
   const today=new Date().toLocaleDateString("es-ES",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
@@ -1134,7 +1269,7 @@ ${piezas}
           </div>
           <div style={{textAlign:"center",padding:"18px 0 14px"}}>
             <div contentEditable suppressContentEditableWarning
-              onBlur={async e=>{const v=e.target.innerText;setPaperName(v);await push(articles,v);}}
+              onBlur={async e=>{const v=e.target.innerText.trim();if(!v||v===paperName)return;setPaperName(v);await estructura({orden:articles.map(a=>a.id),paperName:v});}}
               style={{fontSize:"clamp(36px,8vw,72px)",fontWeight:900,letterSpacing:"-2px",color:"#111",lineHeight:1,fontFamily:"Georgia,serif",cursor:"text",outline:"none",display:"inline-block"}}>
               {paperName}
             </div>
@@ -1148,15 +1283,15 @@ ${piezas}
 
       <main style={{maxWidth:1100,margin:"0 auto",padding:20}}>
         {articles.length>0&&(
-          <div style={{display:"grid",gridTemplateColumns:"4fr 220px",background:"#fff",border:"1px solid #e0e0e0",marginBottom:20,minHeight:420}}>
-            <div style={{borderRight:"1px solid #e0e0e0"}}>
-              <TarjetaPortada article={articles[0]} index={0} onClick={()=>setLeyendo(articles[0].id)} onEditar={()=>setEditando(articles[0])}
+          <div style={{display:"grid",gridTemplateColumns:window.innerWidth<700?"1fr":"4fr 220px",background:"#fff",border:"1px solid #e0e0e0",marginBottom:20,minHeight:420}}>
+            <div style={{borderRight:window.innerWidth<700?"none":"1px solid #e0e0e0",borderBottom:window.innerWidth<700?"1px solid #e0e0e0":"none"}}>
+              <TarjetaPortada article={articles[0]} index={0} onClick={()=>setLeyendo(articles[0].id)} onEditar={()=>abrirEditor(articles[0])} ocupada={ocupadas.has(String(articles[0].id))}
                 onMover={d=>moverArticulo(articles[0].id,d)} onBorrar={articles.length>1?()=>borrarPieza(articles[0].id):null}
                 esPrimera={true} esUltima={articles.length<2}/>
               {/* A partir de la quinta pieza van debajo de la grande, aunque en el orden del periódico siguen detrás de la columna */}
               {articles.slice(4).map((art,i)=>(
                 <div key={art.id} style={{borderTop:"1px solid #e0e0e0"}}>
-                  <TarjetaPortada article={art} index={i+4} mediana={true} onClick={()=>setLeyendo(art.id)} onEditar={()=>setEditando(art)}
+                  <TarjetaPortada article={art} index={i+4} mediana={true} onClick={()=>setLeyendo(art.id)} onEditar={()=>abrirEditor(art)} ocupada={ocupadas.has(String(art.id))}
                     onMover={d=>moverArticulo(art.id,d)} onPrincipal={()=>hacerPrincipal(art.id)}
                     onBorrar={()=>borrarPieza(art.id)}
                     esPrimera={false} esUltima={i===articles.length-5}/>
@@ -1166,7 +1301,7 @@ ${piezas}
             <div>
               {articles.slice(1,4).map((art,i)=>(
                 <div key={art.id} style={{borderBottom:i<Math.min(articles.length,4)-2?"1px solid #e0e0e0":"none"}}>
-                  <TarjetaPortada article={art} index={i+1} photoRight={i===0||i===2} onClick={()=>setLeyendo(art.id)} onEditar={()=>setEditando(art)}
+                  <TarjetaPortada article={art} index={i+1} photoRight={i===0||i===2} onClick={()=>setLeyendo(art.id)} onEditar={()=>abrirEditor(art)} ocupada={ocupadas.has(String(art.id))}
                     onMover={d=>moverArticulo(art.id,d)} onPrincipal={()=>hacerPrincipal(art.id)}
                     onBorrar={()=>borrarPieza(art.id)}
                     esPrimera={false} esUltima={i===articles.length-2}/>
@@ -1177,13 +1312,24 @@ ${piezas}
         )}
         <div style={{background:"#e8f4fd",border:"1px solid #90caf9",borderRadius:8,padding:"12px 18px",fontSize:13,color:"#0d47a1"}}>
           <strong>🔀 PORTADA:</strong> Pasa el ratón por encima de una pieza y usa ▲▼ para moverla, ★ PORTADA para ponerla de grande y 🗑 para eliminarla. Arriba tienes ➕ Noticia y ➕ Opinión para añadir las que quieras.<br/>
-          <strong>🔄 SINCRONIZACIÓN:</strong> Los textos, los tuits, los Instagram y las fotos se guardan solos y los compañeros los ven en unos segundos. Al terminar la clase, pulsa «Descargar periódico» y «Descargar copia».
+          <strong>🔄 SINCRONIZACIÓN:</strong> Los textos, los tuits, los Instagram y las fotos se guardan solos y los compañeros los ven en unos segundos. Al terminar la clase, pulsa «Descargar periódico» y «Descargar copia».<br/>
+          <strong>🔒 UNA NOTICIA, UNA PERSONA:</strong> Mientras alguien escribe una noticia, el resto del grupo no puede abrirla. Se libera cuando la guarda o la cierra con ✕.
         </div>
       </main>
 
-      {editando&&<EditorNoticia article={editando} onGuardar={guardarNoticia} onCancelar={()=>setEditando(null)}/>}
+      {editando&&<EditorNoticia article={editando} onGuardar={guardarNoticia} onCancelar={cerrarEditor}/>}
     </div>
   );
+}
+
+/* Safari cancela la descarga si el enlace se borra enseguida, por eso se espera unos segundos */
+function bajarArchivo(contenido,nombre){
+  const url=URL.createObjectURL(new Blob([contenido],{type:"application/octet-stream"}));
+  const a=document.createElement("a");
+  a.href=url;a.download=nombre;a.rel="noopener";a.style.display="none";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},5000);
 }
 
 /* ── ESTILOS ──────────────────────────────────────── */
